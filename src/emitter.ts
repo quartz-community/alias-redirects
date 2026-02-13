@@ -1,91 +1,67 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import type {
-  QuartzEmitterPlugin,
-  ProcessedContent,
-  BuildCtx,
-  FilePath,
-  FullSlug,
-} from "@quartz-community/types";
-import type { ExampleEmitterOptions } from "./types";
+import type { QuartzEmitterPlugin, BuildCtx, FilePath, FullSlug } from "@quartz-community/types";
+import { joinSegments } from "@quartz-community/types";
+import { simplifySlug, resolveRelative, isRelativeURL } from "@quartz-community/utils";
+import type { VFile } from "vfile";
 
-const defaultOptions: ExampleEmitterOptions = {
-  manifestSlug: "plugin-manifest",
-  includeFrontmatter: true,
-  metadata: {
-    generator: "Quartz Plugin Template",
-  },
-};
-
-const joinSegments = (...segments: string[]) =>
-  segments
-    .filter((segment) => segment.length > 0)
-    .join("/")
-    .replace(/\/+/g, "/") as FilePath;
-
-const writeFile = async (
-  outputDir: string,
+const write = async (
+  ctx: BuildCtx,
   slug: FullSlug,
-  ext: `.${string}` | "",
+  ext: string,
   content: string,
-) => {
-  const outputPath = joinSegments(outputDir, `${slug}${ext}`) as FilePath;
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, content);
-  return outputPath;
+): Promise<FilePath> => {
+  const pathToPage = joinSegments(ctx.argv.output, slug + ext) as FilePath;
+  const dir = path.dirname(pathToPage);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(pathToPage, content);
+  return pathToPage;
 };
 
-/**
- * Example emitter that writes a JSON manifest of content metadata.
- */
-export const ExampleEmitter: QuartzEmitterPlugin<Partial<ExampleEmitterOptions>> = (
-  userOptions?: Partial<ExampleEmitterOptions>,
-) => {
-  const options = { ...defaultOptions, ...userOptions };
-  const emitManifest = async (ctx: BuildCtx, content: ProcessedContent[]) => {
-    const manifest = {
-      ...options.metadata,
-      generatedAt: new Date().toISOString(),
-      pages: content.map(([_tree, vfile]) => {
-        const frontmatter = (vfile.data?.frontmatter ?? {}) as {
-          title?: string;
-          tags?: string[];
-          [key: string]: unknown;
-        };
-        return {
-          slug: vfile.data?.slug ?? null,
-          title: frontmatter.title ?? null,
-          tags: frontmatter.tags ?? null,
-          filePath: vfile.data?.filePath ?? null,
-          frontmatter: options.includeFrontmatter ? frontmatter : undefined,
-        };
-      }),
-    };
+async function* processFile(ctx: BuildCtx, file: VFile) {
+  const ogSlug = simplifySlug(file.data.slug! as FullSlug);
 
-    let json = `${JSON.stringify(manifest, null, 2)}\n`;
-    if (options.transformManifest) {
-      json = options.transformManifest(json);
-    }
+  for (const aliasTarget of ((file.data as Record<string, unknown>).aliases as string[]) ?? []) {
+    const aliasTargetSlug = (
+      isRelativeURL(aliasTarget)
+        ? path.normalize(path.join(ogSlug, "..", aliasTarget))
+        : aliasTarget
+    ) as FullSlug;
 
-    const output = await writeFile(
-      ctx.argv.output,
-      options.manifestSlug as FullSlug,
-      ".json",
-      json,
+    const redirUrl = resolveRelative(aliasTargetSlug, ogSlug);
+    yield write(
+      ctx,
+      aliasTargetSlug,
+      ".html",
+      `
+        <!DOCTYPE html>
+        <html lang="en-us">
+        <head>
+        <title>${ogSlug}</title>
+        <link rel="canonical" href="${redirUrl}">
+        <meta name="robots" content="noindex">
+        <meta charset="utf-8">
+        <meta http-equiv="refresh" content="0; url=${redirUrl}">
+        </head>
+        </html>
+        `,
     );
-    return [output];
-  };
+  }
+}
 
-  return {
-    name: "ExampleEmitter",
-    async emit(ctx, content, _resources) {
-      return emitManifest(ctx, content);
-    },
-    async *partialEmit(ctx, content, _resources, _changeEvents) {
-      const outputPaths = await emitManifest(ctx, content);
-      for (const outputPath of outputPaths) {
-        yield outputPath;
+export const AliasRedirects: QuartzEmitterPlugin = () => ({
+  name: "AliasRedirects",
+  async *emit(ctx, content) {
+    for (const [_tree, file] of content) {
+      yield* processFile(ctx, file);
+    }
+  },
+  async *partialEmit(ctx, _content, _resources, changeEvents) {
+    for (const changeEvent of changeEvents) {
+      if (!changeEvent.file) continue;
+      if (changeEvent.type === "add" || changeEvent.type === "change") {
+        yield* processFile(ctx, changeEvent.file);
       }
-    },
-  };
-};
+    }
+  },
+});
