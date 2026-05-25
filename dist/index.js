@@ -68,6 +68,15 @@ function resolveRelative(current, target) {
 }
 
 // src/emitter.ts
+var MAX_FILENAME_LENGTH = 200;
+var INVALID_FILENAME_CHARS = /[<>:"/\\|?*]/g;
+function sanitizeFilename(filename) {
+  let sanitized = filename.replace(INVALID_FILENAME_CHARS, "-");
+  if (sanitized.length > MAX_FILENAME_LENGTH) {
+    sanitized = sanitized.slice(0, MAX_FILENAME_LENGTH);
+  }
+  return sanitized;
+}
 var write = async (ctx, slug2, ext, content) => {
   const pathToPage = joinSegments(ctx.argv.output, slug2 + ext);
   const dir = path.dirname(pathToPage);
@@ -78,7 +87,8 @@ var write = async (ctx, slug2, ext, content) => {
 async function* processFile(ctx, file) {
   const ogSlug = simplifySlug(file.data.slug);
   for (const aliasTarget of file.data.aliases ?? []) {
-    const aliasTargetSlug = isRelativeURL(aliasTarget) ? path.normalize(path.join(ogSlug, "..", aliasTarget)) : aliasTarget;
+    const rawAliasTarget = isRelativeURL(aliasTarget) ? path.normalize(path.join(ogSlug, "..", aliasTarget)) : aliasTarget;
+    const aliasTargetSlug = sanitizeFilename(rawAliasTarget);
     const redirUrl = resolveRelative(aliasTargetSlug, ogSlug);
     yield write(
       ctx,
