@@ -1,6 +1,6 @@
 # @quartz-community/alias-redirects
 
-Generates HTML redirect pages for frontmatter aliases, so old URLs redirect to the canonical page.
+Generates HTML redirect pages for frontmatter aliases and case-preserving URLs, so old URLs redirect to the canonical page.
 
 ## Installation
 
@@ -18,7 +18,9 @@ plugins:
 
 ## Configuration
 
-This plugin has no configuration options.
+| Option                | Type      | Default | Description                                                                                             |
+| --------------------- | --------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `enableCaseRedirects` | `boolean` | `true`  | Automatically generate redirect pages for URLs that changed casing due to v5's lowercase normalization. |
 
 ## Documentation
 

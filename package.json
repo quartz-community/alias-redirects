@@ -76,7 +76,9 @@
     "dependencies": [],
     "defaultOrder": 50,
     "defaultEnabled": true,
-    "defaultOptions": {}
+    "defaultOptions": {
+      "enableCaseRedirects": true
+    }
   },
   "engines": {
     "node": ">=22",
