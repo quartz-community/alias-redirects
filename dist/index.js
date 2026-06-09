@@ -68,6 +68,9 @@ function resolveRelative(current, target) {
 }
 
 // src/emitter.ts
+var defaultOptions = {
+  enableCaseRedirects: true
+};
 var write = async (ctx, slug2, ext, content) => {
   const pathToPage = joinSegments(ctx.argv.output, slug2 + ext);
   const dir = path.dirname(pathToPage);
@@ -75,47 +78,119 @@ var write = async (ctx, slug2, ext, content) => {
   await fs.writeFile(pathToPage, content);
   return pathToPage;
 };
-async function* processFile(ctx, file) {
+function redirectHtml(title, redirectUrl) {
+  return `<!DOCTYPE html>
+<html lang="en-us">
+<head>
+<title>${title}</title>
+<link rel="canonical" href="${redirectUrl}">
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=${redirectUrl}">
+</head>
+</html>
+`;
+}
+function slugifyPathPreserveCase(s2) {
+  return s2.split("/").map(
+    (segment) => segment.replace(/\s/g, "-").replace(/&/g, "-and-").replace(/%/g, "-percent").replace(/\?/g, "").replace(/#/g, "")
+  ).join("/").replace(/\/$/, "");
+}
+function slugifyFilePathPreserveCase(fp) {
+  fp = stripSlashes(fp);
+  const ext = getFileExtension(fp);
+  const withoutFileExt = fp.replace(new RegExp((ext ?? "") + "$"), "");
+  const finalExt = [".md", ".html", void 0].includes(ext) ? "" : ext ?? "";
+  let slug2 = slugifyPathPreserveCase(withoutFileExt);
+  if (endsWith(slug2, "_index")) {
+    slug2 = slug2.replace(/_index$/, "index");
+  }
+  const segments = slug2.split("/");
+  if (segments.length >= 2 && segments[segments.length - 1] === segments[segments.length - 2]) {
+    segments[segments.length - 1] = "index";
+    slug2 = segments.join("/");
+  }
+  return slug2 + finalExt;
+}
+var _fsCaseSensitive;
+async function isFsCaseSensitive(outputDir) {
+  if (_fsCaseSensitive !== void 0) return _fsCaseSensitive;
+  try {
+    const probeDir = path.join(outputDir, ".quartz-case-probe");
+    await fs.mkdir(probeDir, { recursive: true });
+    const probeLower = path.join(probeDir, "a");
+    const probeUpper = path.join(probeDir, "A");
+    await fs.writeFile(probeLower, "");
+    try {
+      await fs.access(probeUpper);
+      const statLower = await fs.stat(probeLower);
+      const statUpper = await fs.stat(probeUpper);
+      _fsCaseSensitive = statLower.ino !== statUpper.ino;
+    } catch {
+      _fsCaseSensitive = true;
+    }
+    await fs.rm(probeDir, { recursive: true, force: true });
+  } catch {
+    _fsCaseSensitive = true;
+  }
+  return _fsCaseSensitive;
+}
+function _resetFsDetectionCache() {
+  _fsCaseSensitive = void 0;
+}
+async function* processAliases(ctx, file, emittedPaths) {
   const ogSlug = simplifySlug(file.data.slug);
   for (const aliasTarget of file.data.aliases ?? []) {
     const aliasTargetSlug = isRelativeURL(aliasTarget) ? path.normalize(path.join(ogSlug, "..", aliasTarget)) : aliasTarget;
+    emittedPaths.add(aliasTargetSlug);
     const redirUrl = resolveRelative(aliasTargetSlug, ogSlug);
-    yield write(
-      ctx,
-      aliasTargetSlug,
-      ".html",
-      `
-        <!DOCTYPE html>
-        <html lang="en-us">
-        <head>
-        <title>${ogSlug}</title>
-        <link rel="canonical" href="${redirUrl}">
-        <meta name="robots" content="noindex">
-        <meta charset="utf-8">
-        <meta http-equiv="refresh" content="0; url=${redirUrl}">
-        </head>
-        </html>
-        `
-    );
+    yield write(ctx, aliasTargetSlug, ".html", redirectHtml(ogSlug, redirUrl));
   }
 }
-var AliasRedirects = () => ({
-  name: "AliasRedirects",
-  async *emit(ctx, content) {
-    for (const [_tree, file] of content) {
-      yield* processFile(ctx, file);
-    }
-  },
-  async *partialEmit(ctx, _content, _resources, changeEvents) {
-    for (const changeEvent of changeEvents) {
-      if (!changeEvent.file) continue;
-      if (changeEvent.type === "add" || changeEvent.type === "change") {
-        yield* processFile(ctx, changeEvent.file);
+async function* processCaseRedirects(ctx, file, emittedPaths) {
+  const data = file.data;
+  const relativePath = data.relativePath;
+  const slug2 = data.slug;
+  if (!relativePath || !slug2) return;
+  const caseSensitive = await isFsCaseSensitive(ctx.argv.output);
+  if (!caseSensitive) return;
+  const casePreservedSlug = slugifyFilePathPreserveCase(relativePath);
+  if (casePreservedSlug === slug2) return;
+  const simplifiedSlug = simplifySlug(slug2);
+  const simplifiedCasePreserved = casePreservedSlug.replace(/\/index$/, "/");
+  if (emittedPaths.has(casePreservedSlug) || emittedPaths.has(simplifiedCasePreserved)) return;
+  emittedPaths.add(casePreservedSlug);
+  const redirUrl = resolveRelative(casePreservedSlug, simplifiedSlug);
+  yield write(ctx, casePreservedSlug, ".html", redirectHtml(simplifiedSlug, redirUrl));
+}
+var AliasRedirects = (opts) => {
+  const options = { ...defaultOptions, ...opts };
+  return {
+    name: "AliasRedirects",
+    async *emit(ctx, content) {
+      const emittedPaths = /* @__PURE__ */ new Set();
+      for (const [_tree, file] of content) {
+        yield* processAliases(ctx, file, emittedPaths);
+        if (options.enableCaseRedirects) {
+          yield* processCaseRedirects(ctx, file, emittedPaths);
+        }
+      }
+    },
+    async *partialEmit(ctx, _content, _resources, changeEvents) {
+      const emittedPaths = /* @__PURE__ */ new Set();
+      for (const changeEvent of changeEvents) {
+        if (!changeEvent.file) continue;
+        if (changeEvent.type === "add" || changeEvent.type === "change") {
+          yield* processAliases(ctx, changeEvent.file, emittedPaths);
+          if (options.enableCaseRedirects) {
+            yield* processCaseRedirects(ctx, changeEvent.file, emittedPaths);
+          }
+        }
       }
     }
-  }
-});
+  };
+};
 
-export { AliasRedirects };
+export { AliasRedirects, _resetFsDetectionCache };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map
