@@ -3,13 +3,13 @@ import fs from 'fs/promises';
 
 // src/emitter.ts
 
-// node_modules/@quartz-community/types/dist/index.js
+// ../types/dist/index.js
 function joinSegments(...segments) {
   return segments.filter((segment) => segment.length > 0).join("/").replace(/\/+/g, "/");
 }
 "function" == typeof Promise ? Promise.prototype.then.bind(Promise.resolve()) : setTimeout, Math.random().toString(8);
 
-// node_modules/@quartz-community/utils/dist/index.js
+// ../utils/dist/index.js
 function isRelativeURL(s2) {
   const validStart = /^\.{1,2}/.test(s2);
   const validEnding = !endsWith(s2, "index");
