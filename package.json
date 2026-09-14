@@ -1,6 +1,6 @@
 {
   "name": "@quartz-community/alias-redirects",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Alias redirects emitter plugin for Quartz.",
   "type": "module",
   "license": "MIT",
@@ -52,8 +52,8 @@
     }
   },
   "dependencies": {
-    "@quartz-community/types": "^0.2.1",
-    "@quartz-community/utils": "^0.1.0"
+    "@quartz-community/types": "^1.0.0",
+    "@quartz-community/utils": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
