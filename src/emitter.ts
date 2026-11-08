@@ -1,6 +1,12 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import type { QuartzEmitterPlugin, BuildCtx, FilePath, FullSlug } from "@quartz-community/types";
+import type {
+  QuartzEmitterPlugin,
+  BuildCtx,
+  FilePath,
+  FullSlug,
+  ProcessedContent,
+} from "@quartz-community/types";
 import { joinSegments } from "@quartz-community/types";
 import {
   simplifySlug,
@@ -147,8 +153,32 @@ export function _resetFsDetectionCache(): void {
   _fsCaseSensitive = undefined;
 }
 
-async function* processAliases(ctx: BuildCtx, file: VFile, emittedPaths: Set<string>) {
-  const ogSlug = simplifySlug(file.data.slug! as FullSlug);
+/** Normalize an alias/slug for collision checks: no leading/trailing slashes, no `/index`. */
+function normalizeForComparison(slug: string): string {
+  const normalized = stripSlashes(path.posix.normalize(slug.replace(/\\/g, "/")));
+  if (normalized === "." || normalized === "" || normalized === "index") return "";
+  return normalized.replace(/\/index$/, "");
+}
+
+/** Normalized slugs of every real content page; aliases must never overwrite these. */
+function collectContentSlugs(content: ProcessedContent[] | undefined): Set<string> {
+  const slugs = new Set<string>();
+  for (const [_tree, file] of content ?? []) {
+    const slug = file.data.slug as string | undefined;
+    if (slug) slugs.add(normalizeForComparison(slug));
+  }
+  return slugs;
+}
+
+async function* processAliases(
+  ctx: BuildCtx,
+  file: VFile,
+  emittedPaths: Set<string>,
+  contentSlugs: Set<string>,
+) {
+  const fullSlug = file.data.slug! as FullSlug;
+  const ogSlug = simplifySlug(fullSlug);
+  const ownSlug = normalizeForComparison(fullSlug);
 
   for (const aliasTarget of ((file.data as Record<string, unknown>).aliases as string[]) ?? []) {
     const aliasTargetSlug = (
@@ -156,6 +186,17 @@ async function* processAliases(ctx: BuildCtx, file: VFile, emittedPaths: Set<str
         ? path.normalize(path.join(ogSlug, "..", aliasTarget))
         : aliasTarget
     ) as FullSlug;
+
+    const aliasSlug = normalizeForComparison(aliasTargetSlug);
+    // An alias/permalink equal to the page's own path would replace the page
+    // with a redirect to itself (infinite redirect).
+    if (aliasSlug === ownSlug) continue;
+    if (contentSlugs.has(aliasSlug)) {
+      console.warn(
+        `[AliasRedirects] Alias "${aliasTarget}" of "${fullSlug}" collides with an existing page; skipping redirect.`,
+      );
+      continue;
+    }
 
     emittedPaths.add(aliasTargetSlug);
     const redirUrl = resolveRelative(aliasTargetSlug, ogSlug);
@@ -193,19 +234,21 @@ export const AliasRedirects: QuartzEmitterPlugin<Partial<Options>> = (opts) => {
     name: "AliasRedirects",
     async *emit(ctx, content) {
       const emittedPaths = new Set<string>();
+      const contentSlugs = collectContentSlugs(content);
       for (const [_tree, file] of content) {
-        yield* processAliases(ctx, file, emittedPaths);
+        yield* processAliases(ctx, file, emittedPaths, contentSlugs);
         if (options.enableCaseRedirects) {
           yield* processCaseRedirects(ctx, file, emittedPaths);
         }
       }
     },
-    async *partialEmit(ctx, _content, _resources, changeEvents) {
+    async *partialEmit(ctx, content, _resources, changeEvents) {
       const emittedPaths = new Set<string>();
+      const contentSlugs = collectContentSlugs(content);
       for (const changeEvent of changeEvents) {
         if (!changeEvent.file) continue;
         if (changeEvent.type === "add" || changeEvent.type === "change") {
-          yield* processAliases(ctx, changeEvent.file, emittedPaths);
+          yield* processAliases(ctx, changeEvent.file, emittedPaths, contentSlugs);
           if (options.enableCaseRedirects) {
             yield* processCaseRedirects(ctx, changeEvent.file, emittedPaths);
           }

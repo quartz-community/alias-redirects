@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -112,6 +112,46 @@ describe("AliasRedirects", () => {
       const emitted = await collectEmitted(plugin.emit(ctx, content, {} as never));
 
       expect(emitted).toHaveLength(0);
+    });
+  });
+
+  describe("aliases that would overwrite a page (jackyzha0/quartz#2590)", () => {
+    it("skips an alias/permalink equal to the page's own slug", async () => {
+      const file = makeFile({
+        slug: "test-page",
+        relativePath: "test-page.md",
+        aliases: ["/test-page", "test-page", "test-page/", "old-url"],
+      });
+      const plugin = AliasRedirects();
+      const emitted = await collectEmitted(plugin.emit(ctx, [makeContent(file)], {} as never));
+
+      expect(emitted).toEqual([path.join(tmpDir, "old-url.html")]);
+    });
+
+    it("skips an alias equal to a folder index page's own path", async () => {
+      const file = makeFile({
+        slug: "docs/index",
+        relativePath: "docs/index.md",
+        aliases: ["/docs"],
+      });
+      const plugin = AliasRedirects();
+      const emitted = await collectEmitted(plugin.emit(ctx, [makeContent(file)], {} as never));
+
+      expect(emitted).toHaveLength(0);
+    });
+
+    it("skips and warns when an alias collides with another page", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const a = makeFile({ slug: "a", relativePath: "a.md", aliases: ["b"] });
+      const b = makeFile({ slug: "b", relativePath: "b.md" });
+      const plugin = AliasRedirects();
+      const emitted = await collectEmitted(
+        plugin.emit(ctx, [makeContent(a), makeContent(b)], {} as never),
+      );
+
+      expect(emitted).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"b"'));
+      warn.mockRestore();
     });
   });
 
