@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+### Patch Changes
+
+- 7c9d6b1: Relative aliases (`./old`, `../x`) redirect to the right page on Windows. Their target was built with the OS path functions, so on Windows `notes/page` with the alias `./old` got the slug `notes\old`, and the redirect pointed one folder too deep (`/notes/notes/page`). Slugs are now joined with `/` on every OS.
+
 ## 1.0.2
 
 ### Patch Changes
