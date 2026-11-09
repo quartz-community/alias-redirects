@@ -170,6 +170,20 @@ function collectContentSlugs(content: ProcessedContent[] | undefined): Set<strin
   return slugs;
 }
 
+/**
+ * Where an alias puts its redirect. A relative alias (`./old`, `../x`) is resolved against the
+ * page's folder. Slugs are `/`-separated on every OS, so this uses path.posix: on Windows,
+ * `path.join("notes/page", "..", "./old")` is `notes\\old`, and the redirect then pointed one
+ * folder too deep (`/notes/notes/page`).
+ */
+export function aliasTargetSlugOf(ogSlug: string, aliasTarget: string): FullSlug {
+  return (
+    isRelativeURL(aliasTarget)
+      ? path.posix.normalize(path.posix.join(ogSlug, "..", aliasTarget))
+      : aliasTarget
+  ) as FullSlug;
+}
+
 async function* processAliases(
   ctx: BuildCtx,
   file: VFile,
@@ -181,11 +195,7 @@ async function* processAliases(
   const ownSlug = normalizeForComparison(fullSlug);
 
   for (const aliasTarget of ((file.data as Record<string, unknown>).aliases as string[]) ?? []) {
-    const aliasTargetSlug = (
-      isRelativeURL(aliasTarget)
-        ? path.normalize(path.join(ogSlug, "..", aliasTarget))
-        : aliasTarget
-    ) as FullSlug;
+    const aliasTargetSlug = aliasTargetSlugOf(ogSlug, aliasTarget);
 
     const aliasSlug = normalizeForComparison(aliasTargetSlug);
     // An alias/permalink equal to the page's own path would replace the page
