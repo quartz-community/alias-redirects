@@ -6,6 +6,7 @@ import { VFile } from "vfile";
 import type { Root } from "hast";
 import type { BuildCtx, FilePath, FullSlug, ProcessedContent } from "@quartz-community/types";
 import { AliasRedirects, _resetFsDetectionCache } from "../src/index.js";
+import { aliasTargetSlugOf } from "../src/emitter.js";
 
 function makeBuildCtx(outputDir: string): BuildCtx {
   return {
@@ -87,6 +88,29 @@ describe("AliasRedirects", () => {
       expect(html).toContain('<meta http-equiv="refresh"');
       expect(html).toContain('<link rel="canonical"');
       expect(html).toContain('<meta name="robots" content="noindex">');
+    });
+
+    it("resolves relative aliases against the page's folder", async () => {
+      const file = makeFile({
+        slug: "a/b/page",
+        relativePath: "a/b/page.md",
+        aliases: ["./old", "../x"],
+      });
+      const plugin = AliasRedirects();
+      const emitted = await collectEmitted(plugin.emit(ctx, [makeContent(file)], {} as never));
+      const rel = emitted.map((fp) => path.relative(tmpDir, fp).split(path.sep).join("/")).sort();
+      expect(rel).toEqual(["a/b/old.html", "a/x.html"]);
+      const old = await fs.readFile(path.join(tmpDir, "a", "b", "old.html"), "utf-8");
+      expect(old).toContain('url=../../a/b/page"');
+      const x = await fs.readFile(path.join(tmpDir, "a", "x.html"), "utf-8");
+      expect(x).toContain('url=../a/b/page"');
+    });
+
+    // Slugs are "/"-separated on every OS; path.join gave `a\\b\\old` on Windows
+    it("computes relative alias targets with forward slashes", () => {
+      expect(aliasTargetSlugOf("a/b/page", "./old")).toBe("a/b/old");
+      expect(aliasTargetSlugOf("a/b/page", "../x")).toBe("a/x");
+      expect(aliasTargetSlugOf("a/b/page", "old-url")).toBe("old-url");
     });
 
     it("generates multiple redirect pages for multiple aliases", async () => {
