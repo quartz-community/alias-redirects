@@ -6,7 +6,7 @@ import { VFile } from "vfile";
 import type { Root } from "hast";
 import type { BuildCtx, FilePath, FullSlug, ProcessedContent } from "@quartz-community/types";
 import { AliasRedirects, _resetFsDetectionCache } from "../src/index.js";
-import { aliasTargetSlugOf } from "../src/emitter.js";
+import { aliasEscapesOutput, aliasTargetSlugOf } from "../src/emitter.js";
 
 function makeBuildCtx(outputDir: string): BuildCtx {
   return {
@@ -104,6 +104,25 @@ describe("AliasRedirects", () => {
       expect(old).toContain('url=../../a/b/page"');
       const x = await fs.readFile(path.join(tmpDir, "a", "x.html"), "utf-8");
       expect(x).toContain('url=../a/b/page"');
+    });
+
+    // jackyzha0/quartz#2641: a redirect written relative to the output folder with no check
+    it("skips aliases that point outside the site", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const file = makeFile({
+        slug: "page",
+        relativePath: "page.md",
+        aliases: ["../escaped", "/../../abs", "a/../../up", "..\\..\\back", "fine/../ok"],
+      });
+      const plugin = AliasRedirects();
+      const emitted = await collectEmitted(plugin.emit(ctx, [makeContent(file)], {} as never));
+      const rel = emitted.map((fp) => path.relative(tmpDir, fp).split(path.sep).join("/"));
+      expect(rel).toEqual(["ok.html"]);
+      expect(warn).toHaveBeenCalledTimes(4);
+      const outside = await fs.readdir(path.dirname(tmpDir));
+      expect(outside).not.toContain("escaped.html");
+      expect(outside).not.toContain("abs.html");
+      warn.mockRestore();
     });
 
     // Slugs are "/"-separated on every OS; path.join gave `a\\b\\old` on Windows
@@ -338,5 +357,16 @@ describe("AliasRedirects", () => {
 
       expect(emitted).toHaveLength(0);
     });
+  });
+});
+
+describe("aliasEscapesOutput", () => {
+  it("is true for paths that climb above the site root", () => {
+    for (const slug of ["..", "../x", "/../x", "a/../../x", "..\\x"]) {
+      expect(aliasEscapesOutput(slug)).toBe(true);
+    }
+    for (const slug of ["x", "a/../x", "./x", "a/..x", "..x/y"]) {
+      expect(aliasEscapesOutput(slug)).toBe(false);
+    }
   });
 });

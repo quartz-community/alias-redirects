@@ -184,6 +184,16 @@ export function aliasTargetSlugOf(ogSlug: string, aliasTarget: string): FullSlug
   ) as FullSlug;
 }
 
+/**
+ * Whether an alias's redirect would be written outside the output folder: its path, with
+ * backslashes as slashes and leading slashes dropped, climbs above the site root (`../x`,
+ * `/../../x`, `a/../../x`). Such an alias is skipped with a warning (jackyzha0/quartz#2641).
+ */
+export function aliasEscapesOutput(aliasTargetSlug: string): boolean {
+  const normalized = path.posix.normalize(aliasTargetSlug.replace(/\\/g, "/").replace(/^\/+/, ""));
+  return normalized === ".." || normalized.startsWith("../");
+}
+
 async function* processAliases(
   ctx: BuildCtx,
   file: VFile,
@@ -196,6 +206,13 @@ async function* processAliases(
 
   for (const aliasTarget of ((file.data as Record<string, unknown>).aliases as string[]) ?? []) {
     const aliasTargetSlug = aliasTargetSlugOf(ogSlug, aliasTarget);
+
+    if (aliasEscapesOutput(aliasTargetSlug)) {
+      console.warn(
+        `[AliasRedirects] Alias "${aliasTarget}" of "${fullSlug}" points outside the site; skipping redirect.`,
+      );
+      continue;
+    }
 
     const aliasSlug = normalizeForComparison(aliasTargetSlug);
     // An alias/permalink equal to the page's own path would replace the page
