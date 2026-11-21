@@ -1,6 +1,6 @@
 {
   "name": "@quartz-community/alias-redirects",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Alias redirects emitter plugin for Quartz.",
   "type": "module",
   "license": "MIT",
