@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4
+
+### Patch Changes
+
+- dcc9faf: Aliases that point outside the site (`../x`, `/../x`) are skipped with a warning instead of writing redirects outside the output folder (jackyzha0/quartz#2641).
+
 ## 1.0.3
 
 ### Patch Changes
